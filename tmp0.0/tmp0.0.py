@@ -1,101 +1,114 @@
-import streamlit as st
+import json
+from json import loads
+import re
+import random
 import os
-import csv
+from dotenv import load_dotenv
+import streamlit as st
+from openai import OpenAI
+import chardet
+import pandas as pd
 
-# ==========================
-#  CSV パス設定
-# ==========================
+# ===== CSV パス =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "Book1.csv")
 
-
-# ==========================
-#  CSV 読み込み関数（完全版）
-# ==========================
-def load_explanations_from_csv(path):
-    """
-    - バイナリで読み込み null バイト除去
-    - utf-8 / cp932 / shift_jis / latin1 の順でデコードを試す
-    - csv.reader で読み込む
-    - Streamlit にデバッグ情報を表示
-    """
-    st.write("===== CSV DEBUG START =====")
-
-    if not os.path.exists(path):
-        st.error(f"CSV not found at: {path}")
-        raise FileNotFoundError(f"CSV not found: {path}")
-
-    st.write("📁  CSV path:", path)
-
-    # バイナリ読み込み（null byte 対策）
+# ===== 文字コード自動判定して読み込む関数 =====
+def load_csv_auto(path):
     with open(path, "rb") as f:
-        raw = f.read().replace(b'\x00', b'')
+        raw = f.read()
 
-    # エンコーディング候補
-    encodings = ["utf-8", "cp932", "shift_jis", "latin1"]
+    enc = chardet.detect(raw)["encoding"]
+    df = pd.read_csv(pd.io.common.BytesIO(raw), encoding=enc, header=None)
+    return df
 
-    text = None
-    used_encoding = None
+# ===== OpenAI API =====
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key)
 
-    for enc in encodings:
-        try:
-            text = raw.decode(enc)
-            used_encoding = enc
-            break
-        except Exception:
-            continue
+st.title("📘 CSV教材 → 四択問題生成アプリ（Temperature=0.0）")
 
-    # 最終救済（文字化け回避）
-    if text is None:
-        text = raw.decode("utf-8", errors="replace")
-        used_encoding = "utf-8(replaced)"
+# ===== Book1.csv を自動読み込み =====
+if not os.path.exists(CSV_PATH):
+    st.error(f"Book1.csv が見つかりません: {CSV_PATH}")
+    st.stop()
 
-    st.write("🧾  Detected encoding:", used_encoding)
+df = load_csv_auto(CSV_PATH)
 
-    # CSV パース
-    rows = list(csv.reader(text.splitlines()))
-    st.write("🔢  Total rows:", len(rows))
-    st.write("📝  First few rows (raw):")
-    st.write(rows[:8])
+# ===== 1列目のみ使用 =====
+explanations_list = df[0].dropna().astype(str).tolist()
 
-    # 1列目を説明文とする
-    explanations = []
-    for row in rows:
-        if not row:
-            continue
-        explanations.append(row[0])
+# =====問題生成準備=====
+if "question_data" not in st.session_state:
+    st.session_state.next_question = True
 
-    st.write("📚  Parsed explanations sample:", explanations[:8])
-    st.write("===== CSV DEBUG END =====")
+# =====問題生成=====
+if st.session_state.next_question:
 
-    return explanations
+    SelectedQuestion = random.choice(explanations_list)
 
+    response = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[
+            {
+                "role": "system",
+                "content": "あなたはクイズの出題者です。与えられた文章から四択問題をJSON形式で作成してください。"
+            },
+            {"role": "user", "content": SelectedQuestion},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "QuestionData",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "Question": {"type": "string"},
+                        "Choice1": {"type": "string"},
+                        "Choice2": {"type": "string"},
+                        "Choice3": {"type": "string"},
+                        "Choice4": {"type": "string"},
+                        "CorrectAnswer": {"type": "number"},
+                    },
+                    "required": ["Question", "Choice1", "Choice2", "Choice3", "Choice4", "CorrectAnswer"],
+                },
+                "strict": True,
+            },
+        },
+        temperature=0.0
+    )
 
-# ==========================
-#  Streamlit UI
-# ==========================
-def main():
-    st.title("CSV 読み込みデバッグアプリ（完全版）")
+    output_text = response.choices[0].message.content
+    data = loads(output_text)
 
-    st.write("このアプリは Book1.csv を正しく読み込めているか検証します。")
+    st.session_state.question_data = data
+    st.session_state.explanation = SelectedQuestion
+    st.session_state.next_question = False
 
-    # ==========================
-    #  CSV 読み込み
-    # ==========================
-    try:
-        explanations = load_explanations_from_csv(CSV_PATH)
-        st.success("CSV を正常に読み込みました！")
-    except Exception as e:
-        st.error(f"CSV 読み込みエラー: {e}")
-        return
+# ===== UI =====
+q = st.session_state.question_data
 
-    # ==========================
-    #  表示
-    # ==========================
-    st.subheader("読み込んだデータ（先頭20件）")
-    for i, ex in enumerate(explanations[:20]):
-        st.write(f"{i+1}. {ex}")
+st.subheader("🔍 問題")
+st.write(q["Question"])
 
+choices = [
+    f"1. {q['Choice1']}",
+    f"2. {q['Choice2']}",
+    f"3. {q['Choice3']}",
+    f"4. {q['Choice4']}"
+]
 
-if __name__ == "__main__":
-    main()
+selected = st.radio("選択肢：", choices)
+
+if st.button("解答"):
+    selected_index = choices.index(selected) + 1
+    if selected_index == q["CorrectAnswer"]:
+        st.success("🎉 正解！")
+    else:
+        st.error("❌ 不正解")
+    st.info(f"📘 元の文章：\n{st.session_state.explanation}")
+
+if st.button("次の問題へ"):
+    st.session_state.next_question = True
+    st.rerun()
