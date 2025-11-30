@@ -13,16 +13,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "Book1.csv")
 
 # ===== 解説CSV読み込み関数（nullバイト対応・ヘッダーなし対応）=====
-def load_explanations_from_csv(filename):
-    explanations = []
-    with open(filename, "rb") as f:
-        content = f.read().replace(b'\x00', b'')  # null バイト削除
-    decoded = content.decode("utf-8")
-    reader = csv.reader(decoded.splitlines())
-    for row in reader:
-        if row:  # 空行チェック
-            explanations.append(row[0])
-    return explanations
+def load_explanations_from_csv(file_or_bytes):
+    # file_or_bytes が bytes の場合（st.file_uploader）
+    if isinstance(file_or_bytes, bytes):
+        try:
+            return file_or_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return file_or_bytes.decode("cp932")  # ← SHIFT-JIS の別名
+
+    # ファイルパスの場合
+    with open(file_or_bytes, "rb") as f:
+        content = f.read()
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            return content.decode("cp932")
 
 # ===== OpenAI API キーの読み込み =====
 load_dotenv()
