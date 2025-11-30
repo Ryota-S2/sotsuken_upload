@@ -5,12 +5,15 @@ import random
 import os
 from dotenv import load_dotenv
 import streamlit as st
-import openai
 from openai import OpenAI
 import csv
 
-# ===== 解説CSV読み込み関数（nullバイト対応・ヘッダーなし対応） =====
-def load_explanations_from_csv(filename="Book1.csv"):
+# ===== CSV の絶対パスを自動取得 =====
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(BASE_DIR, "Book1.csv")
+
+# ===== 解説CSV読み込み関数（nullバイト対応・ヘッダーなし対応）=====
+def load_explanations_from_csv(filename):
     explanations = []
     with open(filename, "rb") as f:
         content = f.read().replace(b'\x00', b'')  # null バイト削除
@@ -28,7 +31,9 @@ client = OpenAI(api_key=api_key)
 
 # ===== 説明文の読み込みとセッション保持 =====
 if "explanations" not in st.session_state:
-    st.session_state.explanations = load_explanations_from_csv("Book1.csv")
+    if not os.path.exists(CSV_PATH):
+        st.error(f"CSV ファイルが見つかりません: {CSV_PATH}")
+    st.session_state.explanations = load_explanations_from_csv(CSV_PATH)
 
 explanations = st.session_state.explanations
 
@@ -42,7 +47,7 @@ if "question_data" not in st.session_state or st.session_state.get("next_questio
         messages=[
             {
                 "role": "system",
-                "content": "あなたはクイズの出題者です。以下の文から4択問題を出題してください。"
+                "content": "あなたはクイズの出題者です.以下の文から四択問題を作成してください。本文内容に基づいた問題にしてください。出力はJSON形式で返してください。"
             },
             {"role": "user", "content": SelectedQuestion},
         ],
