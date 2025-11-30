@@ -6,21 +6,15 @@ import os
 from dotenv import load_dotenv
 import streamlit as st
 from openai import OpenAI
-import chardet
 import pandas as pd
 
 # ===== CSV パス =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "Book1.csv")
 
-# ===== 文字コード自動判定して読み込む関数 =====
-def load_csv_auto(path):
-    with open(path, "rb") as f:
-        raw = f.read()
-
-    enc = chardet.detect(raw)["encoding"]
-    df = pd.read_csv(pd.io.common.BytesIO(raw), encoding=enc, header=None)
-    return df
+# ===== UTF-8 で読み込む =====
+def load_csv(path):
+    return pd.read_csv(path, encoding="utf-8", header=None)
 
 # ===== OpenAI API =====
 load_dotenv()
@@ -29,12 +23,16 @@ client = OpenAI(api_key=api_key)
 
 st.title("📘 CSV教材 → 四択問題生成アプリ（Temperature=0.0）")
 
-# ===== Book1.csv を自動読み込み =====
+# ===== Book1.csv を読み込む =====
 if not os.path.exists(CSV_PATH):
     st.error(f"Book1.csv が見つかりません: {CSV_PATH}")
     st.stop()
 
-df = load_csv_auto(CSV_PATH)
+try:
+    df = load_csv(CSV_PATH)
+except UnicodeDecodeError:
+    st.error("Book1.csv が UTF-8 で保存されていません。UTF-8 で保存し直してください。")
+    st.stop()
 
 # ===== 1列目のみ使用 =====
 explanations_list = df[0].dropna().astype(str).tolist()
